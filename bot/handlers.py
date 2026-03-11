@@ -136,7 +136,8 @@ async def handle_message(message: Message):
         return
     
     # Обновляем last_active
-    await update_user(telegram_id, {"last_active": "now()"})
+    from datetime import datetime
+    await update_user(telegram_id, {"last_active": datetime.utcnow().isoformat()})
     
     # Проверяем онбординг
     if not user.get("onboarding_done"):

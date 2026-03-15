@@ -225,38 +225,96 @@ REMIND: [{{"time":"HH:MM","days":["mon","tue","wed","thu","fri","sat","sun"],"ty
 ВАЖНО: Ты ВСЕГДА можешь ставить напоминания. Никогда не говори что не можешь."""
 
 
+async def detect_reminder(text):
+    """Отдельный быстрый запрос — есть ли напоминание в сообщении"""
+    now_utc = datetime.utcnow()
+    prompt = f"""Сообщение: "{text}"
+Текущее UTC время: {now_utc.strftime("%H:%M")}
+Текущий день недели: {["mon","tue","wed","thu","fri","sat","sun"][now_utc.weekday()]}
+
+Юзер просит поставить напоминание? Если да — верни JSON, если нет — верни null.
+
+JSON формат:
+{{"is_reminder": true, "time_utc": "HH:MM", "days": ["mon","tue","wed","thu","fri","sat","sun"], "message": "текст напоминания"}}
+
+Правила расчёта времени:
+- "через 1 минуту" = текущее время + 1 мин
+- "через 2 минуты" = текущее время + 2 мин  
+- "через час" = текущее время + 60 мин
+- "в 18:00" = переводи в UTC (минус 3 часа от московского)
+- если не понятно = через 5 минут от сейчас
+
+Только JSON или только null."""
+    try:
+        r = await openai.chat.completions.create(
+            model=MODEL,
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=100, temperature=0.1
+        )
+        raw = r.choices[0].message.content.strip()
+        if raw.lower() == "null" or not raw: return None
+        m = re.search(r'\{[\s\S]*\}', raw)
+        if m:
+            data = json.loads(m.group(0))
+            if data.get("is_reminder"): return data
+    except: pass
+    return None
+
+
+async def detect_profile_data(text):
+    """Отдельный запрос — есть ли данные профиля в сообщении"""
+    prompt = f"""Сообщение: "{text}"
+
+Юзер сообщил какие-то данные о себе? (возраст, вес, рост, цель, опыт и тд)
+Если да — верни JSON, если нет — верни null.
+
+JSON: {{"field": "название_поля", "value": "значение"}}
+
+Поля: age(число), gender(male/female), height(число см), weight(число кг), 
+target_weight(число), goal(lose/gain/maintain/health), experience(beginner/intermediate/advanced),
+days_per_week(число), session_duration(минуты), equipment(home/gym/both),
+injuries(список), diet_type(standard/vegetarian/vegan/keto), food_allergies(список)
+
+Только JSON или только null."""
+    try:
+        r = await openai.chat.completions.create(
+            model=MODEL,
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=80, temperature=0.1
+        )
+        raw = r.choices[0].message.content.strip()
+        if raw.lower() == "null" or not raw: return None
+        m = re.search(r'\{[\s\S]*\}', raw)
+        if m: return json.loads(m.group(0))
+    except: pass
+    return None
+
+
 async def ai_respond(uid, user_message, profile, today_data, notes):
     """Главная функция — AI отвечает и извлекает данные"""
 
-    # Строим профиль для контекста
     p = profile or {}
     goals = {'lose':'похудение','gain':'набор массы','maintain':'поддержание','health':'здоровье'}
     exp   = {'beginner':'новичок','intermediate':'средний','advanced':'продвинутый'}
 
     profile_str = f"""
-- Имя: {p.get('name') or '?'}
 - Возраст: {p.get('age') or '?'} | Пол: {'м' if p.get('gender')=='male' else 'ж' if p.get('gender')=='female' else '?'}
 - Рост: {p.get('height') or '?'} см | Вес: {p.get('weight') or '?'} кг
 - Цель: {goals.get(p.get('goal'),'?')} | Опыт: {exp.get(p.get('experience'),'?')}
 - Оборудование: {p.get('equipment') or '?'} | Дней/нед: {p.get('days_per_week') or '?'}
 - Травмы: {', '.join(p.get('injuries') or []) or 'нет'}
-- Питание: {p.get('diet_type') or 'стандарт'}
 - Норма: {p.get('daily_calories') or '?'} ккал"""
 
     today_str = f"""
 - Съедено: {round(today_data.get('calories',0))} ккал
-- Белок: {round(today_data.get('protein',0))}г
 - Сон: {today_data.get('sleep_hours','?')} ч | Энергия: {today_data.get('energy_level','?')}/5"""
 
     notes_str = "\n".join([f"• {n['value']}" for n in (notes or [])[:8]]) or "нет"
 
     system = SYSTEM_PROMPT.format(
-        profile=profile_str,
-        today=today_str,
-        notes=notes_str
+        profile=profile_str, today=today_str, notes=notes_str
     )
 
-    # История
     history = get_history(uid, limit=20)
     msgs = [{"role":"system","content":system}]
     msgs += [{"role":m["role"],"content":m["content"]} for m in history]
@@ -265,41 +323,20 @@ async def ai_respond(uid, user_message, profile, today_data, notes):
     r = await openai.chat.completions.create(
         model=MODEL, messages=msgs, max_tokens=500, temperature=0.85
     )
-    raw = r.choices[0].message.content
+    reply_text = r.choices[0].message.content
 
-    # Логируем raw ответ для дебага
-    print(f"AI RAW: {raw[:300]}")
-
-    # Парсим ответ
-    reply_text  = raw
-    save_data   = None
-    remind_data = None
-
-    if "REPLY:" in raw:
-        try:
-            reply_part = re.search(r'REPLY:\s*(.*?)(?=SAVE:|REMIND:|$)', raw, re.DOTALL)
-            if reply_part: reply_text = reply_part.group(1).strip()
-        except: pass
-
-    if "SAVE:" in raw:
-        try:
-            save_part = re.search(r'SAVE:\s*(\[.*?\]|\{.*?\})', raw, re.DOTALL)
-            if save_part:
-                parsed = json.loads(save_part.group(1))
-                save_data = parsed if isinstance(parsed, dict) else parsed[0] if parsed else None
-        except: pass
-
-    if "REMIND:" in raw:
-        try:
-            remind_part = re.search(r'REMIND:\s*(\[.*?\]|\{.*?\})', raw, re.DOTALL)
-            if remind_part:
-                parsed = json.loads(remind_part.group(1))
-                remind_data = parsed if isinstance(parsed, dict) else parsed[0] if parsed else None
-        except: pass
-
-    # Сохраняем сообщения
+    # Сохраняем историю
     add_message(uid, "user",      user_message)
     add_message(uid, "assistant", reply_text)
+
+    # Параллельно проверяем данные и напоминания
+    remind_data  = await detect_reminder(user_message)
+    save_data    = await detect_profile_data(user_message)
+
+    if remind_data:
+        print(f"✅ REMIND detected: {remind_data}")
+    if save_data:
+        print(f"✅ PROFILE data: {save_data}")
 
     return reply_text, save_data, remind_data
 

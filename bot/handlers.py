@@ -267,6 +267,9 @@ async def ai_respond(uid, user_message, profile, today_data, notes):
     )
     raw = r.choices[0].message.content
 
+    # Логируем raw ответ для дебага
+    print(f"AI RAW: {raw[:300]}")
+
     # Парсим ответ
     reply_text  = raw
     save_data   = None
@@ -509,6 +512,7 @@ async def handle_all(message: Message):
                 abs_time,
                 days,
                 remind_data.get("message","Напоминание!"))
+            print(f"✅ REMINDER SAVED: {abs_time} days={days}")
         except Exception as e:
             print(f"Reminder save error: {e}")
 

@@ -487,20 +487,17 @@ async def handle_all(message: Message):
             from datetime import timedelta
             raw_time = remind_data.get("time", "")
             
-            # Если время относительное (через N минут) — считаем абсолютное
+            # Считаем абсолютное UTC время
             if "+" in str(raw_time):
-                # формат "+5" = через 5 минут
                 mins = int(str(raw_time).replace("+","").strip())
-                abs_time = (datetime.utcnow() + timedelta(hours=3) + timedelta(minutes=mins)).strftime("%H:%M")
+                abs_time = (datetime.utcnow() + timedelta(minutes=mins)).strftime("%H:%M")
             elif str(raw_time).replace(":","").isdigit() and len(str(raw_time)) <= 2:
-                # просто число минут
                 mins = int(raw_time)
-                abs_time = (datetime.utcnow() + timedelta(hours=3) + timedelta(minutes=mins)).strftime("%H:%M")
+                abs_time = (datetime.utcnow() + timedelta(minutes=mins)).strftime("%H:%M")
             elif raw_time and ":" in str(raw_time):
                 abs_time = str(raw_time)[:5]
             else:
-                # по умолчанию через 5 минут
-                abs_time = (datetime.utcnow() + timedelta(hours=3) + timedelta(minutes=5)).strftime("%H:%M")
+                abs_time = (datetime.utcnow() + timedelta(minutes=2)).strftime("%H:%M")
 
             # Определяем день
             days_map = {0:"mon",1:"tue",2:"wed",3:"thu",4:"fri",5:"sat",6:"sun"}

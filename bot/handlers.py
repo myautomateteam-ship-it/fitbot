@@ -152,9 +152,10 @@ def calc_sleep(uid, tid):
         return h
     return None
 
-def save_reminder(uid, tid, rtype, time_str, days):
+def save_reminder(uid, tid, rtype, time_str, days, message=""):
     db("reminders").insert({"user_id":uid,"telegram_id":tid,"type":rtype,
-        "time_of_day":time_str,"days_of_week":days,"use_gpt":True,"is_active":True}).execute()
+        "message":message,"time_of_day":time_str,"days_of_week":days,
+        "use_gpt":True,"is_active":True}).execute()
 
 def get_due_reminders(cur_time, day):
     r = db("reminders").select("*").eq("is_active",True).execute()
@@ -186,35 +187,42 @@ def calc_nutrition_goals(age, gender, height, weight, activity, goal):
 # ─────────────────────────────────────────────
 
 SYSTEM_PROMPT = """Ты — Макс, персональный фитнес-тренер и коуч. Живой, дружелюбный, умный.
-Общаешься как настоящий человек — без скриптов, без анкет, без роботских фраз.
-Только русский язык. Максимум 200 слов. Эмодзи умеренно.
+Общаешься как настоящий человек — без скриптов, без анкет.
+Только русский язык. Максимум 200 слов.
 
-ТВОЯ ГЛАВНАЯ ЗАДАЧА — незаметно узнать о юзере всё нужное в процессе живого разговора:
-возраст, пол, рост, вес, цель, опыт, оборудование, травмы, питание, расписание.
-Не задавай список вопросов — задавай ОДИН вопрос за раз, естественно вписанный в разговор.
+ГЛАВНАЯ ЗАДАЧА:
+1. Незаметно узнавать данные юзера в разговоре (возраст, вес, цель, опыт и тд)
+2. Ставить напоминания когда просит — ТЫ УМЕЕШЬ ЭТО ДЕЛАТЬ
+3. Помогать с тренировками, питанием, мотивацией
 
-ДАННЫЕ ЮЗЕРА (уже известно):
-{profile}
+ДАННЫЕ ЮЗЕРА:
+{{profile}}
 
 СЕГОДНЯ:
-{today}
+{{today}}
 
-ЗАМЕТКИ О ЮЗЕРЕ:
-{notes}
+ЗАМЕТКИ:
+{{notes}}
 
 ПРАВИЛА:
-1. Если данных нет — узнавай в разговоре, не через анкету
-2. Калории без уверенности — пиши "~"
-3. Медицина/диагнозы — "обратись к врачу"  
-4. Травмы юзера — никогда не предлагай запрещённые упражнения
-5. Не придумывай цифры — только из данных выше
+1. Один вопрос за раз, естественно
+2. Неточные калории — пиши "~"
+3. Медицина — "обратись к врачу"
+4. Травмы — не предлагай запрещённые упражнения
 
-ДЕЙСТВИЯ (верни JSON если нужно что-то сохранить, иначе просто текст ответа):
-Если узнал новые данные — верни:
-REPLY: [твой ответ юзеру]
-SAVE: {{"field":"название","value":"значение"}}
+ФОРМАТЫ ОТВЕТА:
 
-Если просто общаешься — верни только текст ответа без REPLY/SAVE."""
+Если узнал данные:
+REPLY: [ответ]
+SAVE: [{{"field":"поле","value":"значение"}}]
+
+Если юзер просит напомнить:
+REPLY: [ответ типа "Окей, напомню!"]
+REMIND: [{{"time":"HH:MM","days":["mon","tue","wed","thu","fri","sat","sun"],"type":"custom","message":"текст"}}]
+
+Если просто разговор — только текст без тегов.
+
+ВАЖНО: Ты ВСЕГДА можешь ставить напоминания. Никогда не говори что не можешь."""
 
 
 async def ai_respond(uid, user_message, profile, today_data, notes):
@@ -260,23 +268,37 @@ async def ai_respond(uid, user_message, profile, today_data, notes):
     raw = r.choices[0].message.content
 
     # Парсим ответ
-    reply_text = raw
-    save_data  = None
+    reply_text  = raw
+    save_data   = None
+    remind_data = None
 
-    if "REPLY:" in raw and "SAVE:" in raw:
+    if "REPLY:" in raw:
         try:
-            reply_part = re.search(r'REPLY:\s*(.*?)(?=SAVE:)', raw, re.DOTALL)
-            save_part  = re.search(r'SAVE:\s*(\{.*?\})', raw, re.DOTALL)
+            reply_part = re.search(r'REPLY:\s*(.*?)(?=SAVE:|REMIND:|$)', raw, re.DOTALL)
             if reply_part: reply_text = reply_part.group(1).strip()
-            if save_part:  save_data  = json.loads(save_part.group(1))
-        except:
-            reply_text = raw
+        except: pass
+
+    if "SAVE:" in raw:
+        try:
+            save_part = re.search(r'SAVE:\s*(\[.*?\]|\{.*?\})', raw, re.DOTALL)
+            if save_part:
+                parsed = json.loads(save_part.group(1))
+                save_data = parsed if isinstance(parsed, dict) else parsed[0] if parsed else None
+        except: pass
+
+    if "REMIND:" in raw:
+        try:
+            remind_part = re.search(r'REMIND:\s*(\[.*?\]|\{.*?\})', raw, re.DOTALL)
+            if remind_part:
+                parsed = json.loads(remind_part.group(1))
+                remind_data = parsed if isinstance(parsed, dict) else parsed[0] if parsed else None
+        except: pass
 
     # Сохраняем сообщения
     add_message(uid, "user",      user_message)
     add_message(uid, "assistant", reply_text)
 
-    return reply_text, save_data
+    return reply_text, save_data, remind_data
 
 
 async def ai_kbju(food_text):
@@ -457,7 +479,18 @@ async def handle_all(message: Message):
         await handle_food_log(message, uid, profile, today, text); return
 
     # Главный AI обработчик
-    reply, save_data = await ai_respond(uid, text, profile, today, notes)
+    reply, save_data, remind_data = await ai_respond(uid, text, profile, today, notes)
+
+    # Сохраняем напоминание если AI его создал
+    if remind_data and isinstance(remind_data, dict):
+        try:
+            save_reminder(uid, tg_id,
+                remind_data.get("type","custom"),
+                remind_data.get("time","09:00"),
+                remind_data.get("days", ["mon","tue","wed","thu","fri","sat","sun"]),
+                remind_data.get("message",""))
+        except Exception as e:
+            print(f"Reminder save error: {e}")
 
     # Сохраняем данные если AI их извлёк
     if save_data and isinstance(save_data, dict):
@@ -487,8 +520,8 @@ async def handle_all(message: Message):
                         wake = p.get("wake_time") or "08:00"
                         if isinstance(wake, str): wake = wake[:5]
                         all_days = ["mon","tue","wed","thu","fri","sat","sun"]
-                        save_reminder(uid, tg_id, "morning", wake, all_days)
-                        save_reminder(uid, tg_id, "evening", "21:00", all_days)
+                        save_reminder(uid, tg_id, "morning", wake, all_days, "")
+                        save_reminder(uid, tg_id, "evening", "21:00", all_days, "")
 
         elif field == "note":
             save_note(uid, f"note_{int(datetime.now().timestamp())}", str(value), text)

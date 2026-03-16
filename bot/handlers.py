@@ -367,11 +367,14 @@ async def handle(message: Message):
     rem_data = extracted.get("reminder") if extracted else None
     if rem_data and isinstance(rem_data,dict) and rem_data.get("time_utc"):
         try:
+            days = rem_data.get("days") or []
+            if not days:
+                days = ["mon","tue","wed","thu","fri","sat","sun"]
             save_reminder(uid,tg_id,"custom",
                 rem_data["time_utc"],
-                rem_data.get("days",["mon","tue","wed","thu","fri","sat","sun"]),
+                days,
                 rem_data.get("message","Напоминание от Макса!"))
-            print(f"✅ REMINDER saved: {rem_data['time_utc']}")
+            print(f"✅ REMINDER saved: {rem_data['time_utc']} days={days}")
         except Exception as e:
             print(f"Reminder error: {e}")
 

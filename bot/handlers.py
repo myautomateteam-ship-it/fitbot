@@ -175,8 +175,10 @@ async def ai_main(uid, user_msg, profile, today_data, notes, tz_offset=3):
     goals={'lose':'похудение','gain':'набор','maintain':'поддержание','health':'здоровье'}
     exp={'beginner':'новичок','intermediate':'средний','advanced':'продвинутый'}
 
+    now_local = datetime.utcnow() + timedelta(hours=tz)
     sys = f"""Ты — Макс, личный фитнес-тренер. Живой, дружелюбный, умный.
 Общаешься как человек — без скриптов и анкет. Только русский. Макс 200 слов.
+Сейчас: {now_local.strftime("%H:%M %d.%m.%Y")} (местное время юзера, UTC+{tz})
 
 ДАННЫЕ ЮЗЕРА:
 Возраст:{p.get('age','?')} Пол:{'м' if p.get('gender')=='male' else 'ж' if p.get('gender')=='female' else '?'} Рост:{p.get('height','?')}см Вес:{p.get('weight','?')}кг
@@ -421,125 +423,4 @@ async def show_progress(message,uid,profile,today):
         f"⚖️ {p.get('weight','?')} кг | 🎯 {goals.get(p.get('goal'),'?')}\n"
         f"😴 Сон: {today.get('sleep_hours','—')} ч | ⚡ {today.get('energy_level','—')}/5\n\n"
         f"🍽 {round(today.get('calories',0))} / {round(dc)} ккал\n"
-        f"🥩 Б:{round(today.get('protein',0))}г 🥑 Ж:{round(today.get('fat',0))}г 🍞 У:{round(today.get('carbs',0))}г",
-        reply_markup=menu()
-    )
-
-async def show_schedule(message,uid):
-    r=sb.table("schedule").select("*").eq("user_id",uid).execute()
-    if not (r.data or []):
-        await message.answer("📅 Расписание не настроено.\n\nРасскажи когда просыпаешься, когда работаешь, когда удобно тренироваться — настрою!",reply_markup=menu())
-    else:
-        days={'mon':'Пн','tue':'Вт','wed':'Ср','thu':'Чт','fri':'Пт','sat':'Сб','sun':'Вс'}
-        txt="📅 Расписание:\n\n"
-        for s in r.data:
-            d=days.get(s['day_of_week'],s['day_of_week'])
-            txt+=f"{d}: 🌅{s.get('wake_time','?')} 💼{s.get('work_start','нет')} 💪{s.get('workout_time','?')}\n" if not s.get('is_rest_day') else f"{d}: 😴 Отдых\n"
-        await message.answer(txt,reply_markup=menu())
-
-async def show_profile(message,user,profile):
-    p=profile or {}
-    goals={'lose':'похудение','gain':'набор','maintain':'поддержание','health':'здоровье'}
-    exp={'beginner':'новичок','intermediate':'средний','advanced':'продвинутый'}
-    await message.answer(
-        f"⚙️ Профиль\n\n"
-        f"👤 {user.get('first_name','')} | {'♂️' if p.get('gender')=='male' else '♀️' if p.get('gender')=='female' else '?'} | {p.get('age','?')} лет\n"
-        f"📏 {p.get('height','?')} см | ⚖️ {p.get('weight','?')} кг → 🎯 {p.get('target_weight','?')} кг\n"
-        f"🏆 {goals.get(p.get('goal'),'?')} | 💪 {exp.get(p.get('experience'),'?')}\n"
-        f"🏋️ {p.get('equipment','?')} | {p.get('days_per_week','?')} дн/нед\n"
-        f"🩺 {', '.join(p.get('injuries') or []) or 'нет'}\n\n"
-        f"🔥 {round(p.get('daily_calories') or 0)} ккал | Б:{round(p.get('daily_protein') or 0)} Ж:{round(p.get('daily_fat') or 0)} У:{round(p.get('daily_carbs') or 0)} г",
-        reply_markup=menu()
-    )
-
-@dp.callback_query(F.data.startswith("e"))
-async def cb_energy(cb: CallbackQuery):
-    level=int(cb.data[1:])
-    user=get_user(cb.from_user.id)
-    if not user: return
-    uid=user["id"]
-    save_checkin(uid,{"energy_level":level})
-    sleep_h=calc_sleep(uid,cb.from_user.id)
-    words={1:"Понял, бережём силы 🙏",3:"Хорошо!",5:"Огонь! 🔥"}
-    msg=words.get(level,"Записал!")
-    if sleep_h: msg+=f"\n😴 Поспал {sleep_h} ч — {'маловато' if sleep_h<6 else 'хорошо!'}"
-    await cb.message.edit_text(msg)
-    await cb.message.answer("Чем займёмся?",reply_markup=menu())
-
-# ── SCHEDULER ────────────────────────────────────────────────────────────────
-
-async def scheduler():
-    days_map={0:'mon',1:'tue',2:'wed',3:'thu',4:'fri',5:'sat',6:'sun'}
-    print("⏰ Scheduler запущен")
-    while True:
-        try:
-            now=datetime.utcnow()
-            cur_time=now.strftime("%H:%M")
-            cur_day=days_map[now.weekday()]
-            for rem in get_due(cur_time,cur_day):
-                try:
-                    tg_id=rem["telegram_id"]
-                    user=get_user(tg_id)
-                    if not user or user.get("status")=="banned": continue
-                    uid=user["id"]
-                    profile=get_prof(uid)
-                    today={**today_food(uid),**(get_checkin(uid) or {})}
-                    rtype=rem.get("type","custom")
-                    if rtype=="custom" and rem.get("message"):
-                        text=f"🔔 {rem['message']}"
-                    else:
-                        text=await ai_reminder_text(rtype,profile,today)
-                    if rtype=="morning":
-                        await bot.send_message(tg_id,text,reply_markup=energy_kb())
-                    else:
-                        await bot.send_message(tg_id,text,reply_markup=menu())
-                    sb.table("reminders").update({"last_sent":datetime.utcnow().isoformat()}).eq("id",rem["id"]).execute()
-                    print(f"✅ Sent reminder to {tg_id}: {rtype}")
-                except Exception as e:
-                    print(f"Reminder error: {e}")
-        except Exception as e:
-            print(f"Scheduler error: {e}")
-        await asyncio.sleep(60)
-
-# ── ADMIN ─────────────────────────────────────────────────────────────────────
-
-@dp.message(Command("admin"))
-async def cmd_admin(message: Message):
-    user=get_user(message.from_user.id)
-    if not user or user.get("role") not in ["admin","superadmin"]: return
-    s=get_stats()
-    await message.answer(f"👑 Админ\n👥{s['total']} ✅{s['active']} 📋{s['onboarded']}\n/ban [id] /unban [id] /broadcast [текст]")
-
-@dp.message(Command("ban"))
-async def cmd_ban(message: Message):
-    user=get_user(message.from_user.id)
-    if not user or user.get("role") not in ["admin","superadmin"]: return
-    args=message.text.split()
-    if len(args)<2: await message.answer("/ban [id]"); return
-    sb.table("users").update({"status":"banned"}).eq("telegram_id",int(args[1])).execute()
-    await message.answer(f"✅ Забанен {args[1]}")
-
-@dp.message(Command("broadcast"))
-async def cmd_broadcast(message: Message):
-    user=get_user(message.from_user.id)
-    if not user or user.get("role") not in ["admin","superadmin"]: return
-    text=message.text.replace("/broadcast","").strip()
-    if not text: await message.answer("/broadcast [текст]"); return
-    sent=0
-    for u in get_all_users():
-        try:
-            await bot.send_message(u["telegram_id"],text)
-            sent+=1
-            await asyncio.sleep(0.05)
-        except: pass
-    await message.answer(f"✅ {sent} отправлено")
-
-# ── ЗАПУСК ────────────────────────────────────────────────────────────────────
-
-async def main():
-    print("🤖 FitBot запущен!")
-    asyncio.create_task(scheduler())
-    await dp.start_polling(bot)
-
-if __name__=="__main__":
-    asyncio.run(main())
+        f"🥩 Б:{round(today.get('protein',0))}г 🥑 Ж:{round(today.get('

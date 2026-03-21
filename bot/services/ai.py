@@ -37,7 +37,7 @@ def _parse_json(text):
 
 # ── AI MAIN (живой чат) ───────────────────────────────────────────────────────
 
-async def ai_main(uid, user_msg, profile, today_data, notes, tz=3):
+async def ai_main(uid, user_msg, profile, today_data, notes, tz=3, system_override=None):
     from bot.db.misc import get_history, add_message
     p = profile or {}
     t = today_data or {}
@@ -63,7 +63,8 @@ async def ai_main(uid, user_msg, profile, today_data, notes, tz=3):
 - Ты умеешь ставить напоминания"""
 
     history = get_history(uid, 20)
-    msgs = [{"role": "system", "content": system}]
+    final_system = system_override if system_override else system
+    msgs = [{"role": "system", "content": final_system}]
     msgs += [{"role": m["role"], "content": m["content"]} for m in history]
     msgs.append({"role": "user", "content": user_msg})
 

@@ -153,8 +153,27 @@ async def handle_onboarding_step(message: Message, user: dict, text: str, profil
     uid   = user["id"]
     tg_id = message.from_user.id
 
-    # Параллельно извлекаем данные
-    prof_data = await ai_extract_profile(text)
+    # Параллельно извлекаем данные профиля И напоминания
+    prof_data, reminders = await asyncio.gather(
+        ai_extract_profile(text),
+        ai_extract_reminder(text, (get_profile(uid) or {}).get("timezone_offset") or 3)
+    )
+
+    # Сохраняем напоминания даже во время онбординга
+    for rem in (reminders or []):
+        if not rem or not rem.get("time_utc"):
+            continue
+        days = rem.get("days") or []
+        if not days:
+            cur_day = ["mon","tue","wed","thu","fri","sat","sun"][datetime.utcnow().weekday()]
+            days = [cur_day] if rem.get("one_time") else ["mon","tue","wed","thu","fri","sat","sun"]
+        save_reminder(
+            uid, tg_id, "custom",
+            rem["time_utc"], days,
+            rem.get("message", "Напоминание!"),
+            one_time=rem.get("one_time", True)
+        )
+        print(f"✅ Reminder saved: {rem['time_utc']} msg={rem.get('message')}")
 
     saved = False
     if prof_data and isinstance(prof_data, dict):
@@ -172,11 +191,9 @@ async def handle_onboarding_step(message: Message, user: dict, text: str, profil
     missing = get_missing_required(profile)
 
     if missing is None:
-        # Все обязательные данные собраны
         _try_calc_bmr(uid)
         await finish_onboarding(message, user)
     else:
-        # Задаём следующий вопрос через AI
         context = f"Юзер ответил: '{text}'. "
         if not saved:
             context += f"Ответ непонятен, переспроси мягко про {missing_field}. "

@@ -119,14 +119,16 @@ async def handle_ai_message(message: Message, user: dict, text: str):
 
     # Сохраняем данные профиля
     if prof_data and isinstance(prof_data, dict):
-        field = prof_data.get("field")
-        value = prof_data.get("value")
-        if field and field in PROFILE_FIELDS:
-            converted = convert_value(field, value)
-            if converted is not None:
-                update_profile(uid, {field: converted})
-                _try_calc_bmr(uid)
-                print(f"✅ Profile: {field}={converted}")
+        to_save = {}
+        for field, value in prof_data.items():
+            if field in PROFILE_FIELDS:
+                converted = convert_value(field, value)
+                if converted is not None:
+                    to_save[field] = converted
+        if to_save:
+            update_profile(uid, to_save)
+            _try_calc_bmr(uid)
+            print(f"✅ Profile saved: {to_save}")
 
     # Сохраняем напоминания
     for rem in (reminders or []):
@@ -178,16 +180,18 @@ async def handle_onboarding_step(message: Message, user: dict, text: str, profil
     print(f"🔍 ai_extract_profile returned: {prof_data}")
     saved = False
     if prof_data and isinstance(prof_data, dict):
-        field = prof_data.get("field")
-        value = prof_data.get("value")
-        print(f"🔍 field={field} value={value} in PROFILE_FIELDS={field in PROFILE_FIELDS if field else False}")
-        if field and field in PROFILE_FIELDS:
-            converted = convert_value(field, value)
-            print(f"🔍 converted={converted}")
-            if converted is not None:
-                update_profile(uid, {field: converted})
-                saved = True
-                print(f"✅ Onboarding saved: {field}={converted}")
+        to_save = {}
+        for field, value in prof_data.items():
+            if field in PROFILE_FIELDS:
+                converted = convert_value(field, value)
+                if converted is not None:
+                    to_save[field] = converted
+        if to_save:
+            update_profile(uid, to_save)
+            saved = True
+            print(f"✅ Onboarding saved: {to_save}")
+        else:
+            print(f"⚠️ No valid fields to save from: {prof_data}")
     else:
         print(f"⚠️ No profile data extracted")
 

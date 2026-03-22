@@ -125,10 +125,13 @@ async def ai_extract_reminder(text, tz=3):
 }}
 
 Расчёт UTC (местное минус {tz}ч):
-- "через 2 мин" → {(now_utc + timedelta(minutes=2)).strftime("%H:%M")} UTC, one_time:true
-- "через час" → {(now_utc + timedelta(hours=1)).strftime("%H:%M")} UTC, one_time:true
-- "завтра в 14:00" → {(tomorrow.replace(hour=14,minute=0) - timedelta(hours=tz)).strftime("%H:%M")} UTC, one_time:true
-- "каждый день в 9:00" → {(now_utc.replace(hour=9,minute=0) - timedelta(hours=tz)).strftime("%H:%M")} UTC, one_time:false
+- "через 2 мин" → {(now_utc + timedelta(minutes=2)).strftime("%H:%M")} UTC, one_time:true, days:["mon","tue","wed","thu","fri","sat","sun"]
+- "через час" → {(now_utc + timedelta(hours=1)).strftime("%H:%M")} UTC, one_time:true, days:["mon","tue","wed","thu","fri","sat","sun"]
+- "завтра в 14:00" → {(tomorrow.replace(hour=14,minute=0) - timedelta(hours=tz)).strftime("%H:%M")} UTC, one_time:true, days:["mon","tue","wed","thu","fri","sat","sun"]
+- "каждый день в 9:00" → {(now_utc.replace(hour=9,minute=0) - timedelta(hours=tz)).strftime("%H:%M")} UTC, one_time:false, days:["mon","tue","wed","thu","fri","sat","sun"]
+
+ВАЖНО: days ВСЕГДА должен содержать названия дней недели: mon/tue/wed/thu/fri/sat/sun
+НИКОГДА не пиши даты типа "2026-03-22" в days!
 
 Если несколько напоминаний — несколько объектов в массиве.
 Только JSON массив."""

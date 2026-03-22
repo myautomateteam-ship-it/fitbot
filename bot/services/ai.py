@@ -79,51 +79,47 @@ async def ai_main(uid, user_msg, profile, today_data, notes, tz=3, system_overri
 # ── AI EXTRACT PROFILE ────────────────────────────────────────────────────────
 
 async def ai_extract_profile(text):
-    prompt = f"""Проанализируй текст и извлеки данные о человеке.
+    prompt = f"""Проанализируй текст и извлеки ВСЕ данные о человеке.
 
 Текст: "{text}"
 
-Если в тексте есть ЛЮБЫЕ данные о человеке — верни JSON объект.
-Если данных нет — верни только слово null.
+Верни ОДИН JSON объект со всеми найденными полями.
+Если данных нет — верни null.
 
-Примеры:
-"мне 25 лет" → {{"field":"age","value":25}}
-"вешу 80кг" → {{"field":"weight","value":80}}
-"хочу похудеть" → {{"field":"goal","value":"lose"}}
-"рост 180" → {{"field":"height","value":180}}
-"я парень" → {{"field":"gender","value":"male"}}
-"тренируюсь в зале" → {{"field":"equipment","value":"gym"}}
-"новичок в фитнесе" → {{"field":"experience","value":"beginner"}}
-"тренируюсь дома" → {{"field":"equipment","value":"home"}}
-"хочу набрать массу" → {{"field":"goal","value":"gain"}}
-"поддерживаю форму" → {{"field":"goal","value":"maintain"}}
-"похудеть" → {{"field":"goal","value":"lose"}}
+Пример:
+"мне 25 лет, вешу 80, хочу похудеть" → {{"age":25,"weight":80,"goal":"lose"}}
+"я девушка, рост 165, тренируюсь дома" → {{"gender":"female","height":165,"equipment":"home"}}
+"хочу похудеть" → {{"goal":"lose"}}
+"привет как дела" → null
 
-Поля и значения:
-- age: число лет
-- gender: male или female
-- height: число в см
-- weight: число в кг  
+Поля:
+- age: число
+- gender: male/female
+- height: число см
+- weight: число кг
 - goal: lose/gain/maintain/health
 - experience: beginner/intermediate/advanced
 - equipment: home/gym/both
 - days_per_week: число
-- session_duration: минуты
-- injuries: список травм
+- session_duration: число минут
+- injuries: массив строк
 - diet_type: standard/vegetarian/vegan/keto
 
-Верни ТОЛЬКО JSON или ТОЛЬКО null. Никакого другого текста."""
+ТОЛЬКО JSON объект или ТОЛЬКО null."""
     try:
         r = await client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=80, temperature=0.0
+            max_tokens=150, temperature=0.0
         )
         raw = r.choices[0].message.content.strip()
         print(f"🔍 extract_profile raw: {raw}")
         if "null" in raw.lower() and "{" not in raw:
             return None
-        return _parse_json(raw)
+        result = _parse_json(raw)
+        if result and isinstance(result, dict):
+            return result
+        return None
     except Exception as e:
         print(f"❌ extract_profile error: {e}")
         return None

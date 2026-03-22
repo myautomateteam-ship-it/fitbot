@@ -175,16 +175,21 @@ async def handle_onboarding_step(message: Message, user: dict, text: str, profil
         )
         print(f"✅ Reminder saved: {rem['time_utc']} msg={rem.get('message')}")
 
+    print(f"🔍 ai_extract_profile returned: {prof_data}")
     saved = False
     if prof_data and isinstance(prof_data, dict):
         field = prof_data.get("field")
         value = prof_data.get("value")
+        print(f"🔍 field={field} value={value} in PROFILE_FIELDS={field in PROFILE_FIELDS if field else False}")
         if field and field in PROFILE_FIELDS:
             converted = convert_value(field, value)
+            print(f"🔍 converted={converted}")
             if converted is not None:
                 update_profile(uid, {field: converted})
                 saved = True
-                print(f"✅ Onboarding: {field}={converted}")
+                print(f"✅ Onboarding saved: {field}={converted}")
+    else:
+        print(f"⚠️ No profile data extracted")
 
     # Обновляем профиль
     profile = get_profile(uid)
